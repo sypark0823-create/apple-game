@@ -83,6 +83,12 @@
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.15); }
   }
+  .stat.best .value { color: #d98a00; }
+  .stat.best.flash .value { animation: bestFlash .5s ease; }
+  @keyframes bestFlash {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.25); color: #ff8a00; }
+  }
 
   .score-pop-host { position: relative; }
   .score-pop {
@@ -273,6 +279,57 @@
     font-size: 13px; color: #9a7d7d;
     margin-top: 2px;
   }
+
+  .firework-particle {
+    position: fixed;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 200;
+    animation: fw-fly .9s ease-out forwards;
+    box-shadow: 0 0 6px currentColor;
+  }
+  @keyframes fw-fly {
+    0% { transform: translate(0, 0) scale(1); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) scale(0.3); opacity: 0; }
+  }
+
+  .record-banner {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #ffd23f, #ff8a3f);
+    color: #5a3200;
+    font-size: 28px;
+    font-weight: 900;
+    padding: 14px 34px;
+    border-radius: 40px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+    z-index: 201;
+    pointer-events: none;
+    white-space: nowrap;
+    animation: bannerPop 2.2s ease forwards;
+  }
+  @keyframes bannerPop {
+    0% { opacity: 0; transform: translate(-50%, 20px) scale(0.7); }
+    15% { opacity: 1; transform: translate(-50%, 0) scale(1.1); }
+    25% { transform: translate(-50%, 0) scale(1); }
+    85% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -14px) scale(1); }
+  }
+
+  .record-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #ffd23f, #ff8a3f);
+    color: #5a3200;
+    font-weight: 800;
+    font-size: 14px;
+    padding: 4px 14px;
+    border-radius: 14px;
+    margin-bottom: 8px;
+    animation: bestFlash 1s ease infinite;
+  }
 </style>
 </head>
 <body>
@@ -291,6 +348,10 @@
     <div class="stat score-pop-host" id="scoreHost">
       <div class="label">SCORE</div>
       <div class="value" id="scoreValue">0</div>
+    </div>
+    <div class="stat best">
+      <div class="label">BEST 🏆</div>
+      <div class="value" id="bestValue">0</div>
     </div>
   </header>
 
@@ -318,6 +379,7 @@
 <div class="overlay hidden" id="endOverlay">
   <div class="panel">
     <h1>게임 종료!</h1>
+    <div id="recordBadge" class="record-badge" style="display:none;">🏆 신기록 달성! 🏆</div>
     <p>이번 판 최종 점수</p>
     <div class="final-score" id="finalScore">0</div>
     <button class="btn" id="restartBtn">다시하기</button>
@@ -335,17 +397,26 @@
   const timeStatEl = document.getElementById('timeStat');
   const scoreValueEl = document.getElementById('scoreValue');
   const scoreHostEl = document.getElementById('scoreHost');
+  const bestValueEl = document.getElementById('bestValue');
+  const bestStatEl = document.querySelector('.stat.best');
+  const recordBadgeEl = document.getElementById('recordBadge');
   const startOverlay = document.getElementById('startOverlay');
   const endOverlay = document.getElementById('endOverlay');
   const startBtn = document.getElementById('startBtn');
   const restartBtn = document.getElementById('restartBtn');
   const finalScoreEl = document.getElementById('finalScore');
 
+  const HIGH_SCORE_KEY = 'appleGameHighScore';
+
   let cells = [];       // {row, col, value, removed, el}
   let score = 0;
+  let highScore = Number(localStorage.getItem(HIGH_SCORE_KEY)) || 0;
+  let recordBrokenThisGame = false;
   let timeLeft = GAME_TIME;
   let timerId = null;
   let running = false;
+
+  bestValueEl.textContent = String(highScore);
 
   let dragging = false;
   let startPos = null;   // {x, y} relative to board
@@ -387,9 +458,11 @@
   function resetGame() {
     score = 0;
     timeLeft = GAME_TIME;
+    recordBrokenThisGame = false;
     scoreValueEl.textContent = '0';
     timeValueEl.textContent = String(GAME_TIME);
     timeStatEl.classList.remove('low');
+    recordBadgeEl.style.display = 'none';
     buildGrid();
   }
 
@@ -415,6 +488,7 @@
     running = false;
     clearInterval(timerId);
     finalScoreEl.textContent = String(score);
+    recordBadgeEl.style.display = recordBrokenThisGame ? 'inline-block' : 'none';
     endOverlay.classList.remove('hidden');
   }
 
@@ -426,6 +500,55 @@
     pop.textContent = '+' + n;
     scoreHostEl.appendChild(pop);
     setTimeout(() => pop.remove(), 800);
+
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem(HIGH_SCORE_KEY, String(highScore));
+      bestValueEl.textContent = String(highScore);
+      bestStatEl.classList.add('flash');
+      setTimeout(() => bestStatEl.classList.remove('flash'), 500);
+
+      if (!recordBrokenThisGame) {
+        recordBrokenThisGame = true;
+        celebrateNewRecord();
+      }
+    }
+  }
+
+  function spawnFirework(x, y) {
+    const colors = ['#ff5e5e', '#ffd23f', '#38e07a', '#4fa8ff', '#ff8ad8', '#c17aff'];
+    const count = 26;
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.2;
+      const dist = 60 + Math.random() * 70;
+      const p = document.createElement('div');
+      p.className = 'firework-particle';
+      p.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+      p.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+      p.style.left = x + 'px';
+      p.style.top = y + 'px';
+      p.style.color = colors[Math.floor(Math.random() * colors.length)];
+      p.style.background = p.style.color;
+      document.body.appendChild(p);
+      setTimeout(() => p.remove(), 900);
+    }
+  }
+
+  function celebrateNewRecord() {
+    const banner = document.createElement('div');
+    banner.className = 'record-banner';
+    banner.textContent = '🎉 새로운 최고 기록! 🎉';
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 2200);
+
+    const bursts = 5;
+    for (let b = 0; b < bursts; b++) {
+      setTimeout(() => {
+        const x = window.innerWidth * (0.15 + Math.random() * 0.7);
+        const y = window.innerHeight * (0.2 + Math.random() * 0.35);
+        spawnFirework(x, y);
+      }, b * 220);
+    }
   }
 
   // ---- Drag selection logic ----
